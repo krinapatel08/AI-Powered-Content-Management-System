@@ -1,13 +1,15 @@
 import axios from 'axios';
 
+const BASE_URL = import.meta.env.VITE_API_URL;
+
 const axiosInstance = axios.create({
-  baseURL: 'http://127.0.0.1:8000/api/', // must match your Django API
+  baseURL: BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Automatically attach token to requests
+// Automatically attach token
 axiosInstance.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');

@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import ArticleDetail from './pages/ArticleDetail';
 import CreateArticle from './pages/CreateArticle';
+import EditArticle from "./pages/EditArticle";
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/article/:id" element={<ArticleDetail />} />
             <Route path="/create" element={<CreateArticle />} />
+            <Route path="/edit/:id" element={<EditArticle />} />
           </Routes>
         </div>
       </div>

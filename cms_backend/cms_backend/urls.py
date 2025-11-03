@@ -14,6 +14,8 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+# urls.py
+
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import (
@@ -21,10 +23,17 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 
-urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),  
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'), 
-    path('api/', include('articles.urls')),  
-]
+# 1. Import the default view for the API root (optional, but clean)
+from rest_framework.routers import DefaultRouter
+router = DefaultRouter()
+# Optionally, register your views with the router here
 
+urlpatterns = [
+    # 2. ADD THIS LINE to handle the root URL (/) and redirect to /api/
+    path('', include('articles.urls')), # Assuming articles.urls is where your API root is defined
+    
+    path('admin/', admin.site.urls),
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),   
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'), 
+    path('api/', include('articles.urls')),   
+]

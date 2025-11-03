@@ -1,102 +1,161 @@
-import React, { useState } from 'react';
-import axiosInstance from '../api/axios';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from "react";
+import axiosInstance from "../api/axios";
+import { useNavigate } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 function CreateArticle() {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({
-    title: '',
-    content: '',
-  });
-  const [aiTopic, setAiTopic] = useState('');
-  const [aiGenerated, setAiGenerated] = useState('');
-  const [error, setError] = useState('');
 
+  const [formData, setFormData] = useState({
+    title: "",
+    content: "",
+    tags: "",
+  });
+
+  const [aiTopic, setAiTopic] = useState("");
+  const [aiTags, setAiTags] = useState([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // ---------------- Handle Input Change ----------------
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // Submit new article
+  // ---------------- Save Article ----------------
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await axiosInstance.post('articles/', formData);
-      alert('Article created!');
-      navigate('/');
-    } catch  {
-      setError('Error creating article');
+      await axiosInstance.post("articles/", formData);
+      alert("✅ Article saved successfully!");
+      navigate("/dashboard");
+    } catch (err) {
+      console.error(err);
+      setError("Error saving article");
     }
   };
 
-  // Generate AI content based on topic
+  // ---------------- Generate Blog + Tags ----------------
   const handleAIGenerate = async () => {
-    if (!aiTopic) return alert('Enter a topic');
+    if (!aiTopic.trim()) return alert("Please enter a topic first!");
+
     try {
-      const res = await axiosInstance.post('articles/generate/', { topic: aiTopic });
-      setAiGenerated(res.data.content);
-      setFormData({ ...formData, content: res.data.content });
+      setLoading(true);
+      setError("");
+
+      const res = await axiosInstance.post("articles/generate/", { topic: aiTopic });
+
+      const generatedContent = res.data.content || "";
+      const tags = res.data.tags || [];
+
+      setFormData({
+        title: aiTopic,
+        content: generatedContent,
+        tags: tags.join(", "),
+      });
+      setAiTags(tags);
+
+      alert("✨ AI generated blog successfully! You can now edit before publishing.");
     } catch (err) {
-      console.error(err);
-      setError('AI generation failed');
+      console.error("❌ AI generation failed:", err.response?.data || err.message);
+      setError("AI generation failed. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-3xl font-bold mb-4">Create Article</h1>
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-purple-100 dark:from-gray-900 dark:to-gray-800 p-6">
+      <div className="max-w-3xl mx-auto bg-white dark:bg-gray-900 shadow-xl rounded-2xl p-8 border border-purple-100 dark:border-gray-700">
+        <h1 className="text-3xl font-bold mb-6 text-purple-700 dark:text-purple-300 text-center">
+          📝 Create a New Blog
+        </h1>
 
-      {error && <p className="text-red-500 mb-2">{error}</p>}
+        {error && <p className="text-red-500 mb-4 text-center">{error}</p>}
 
-      <div className="mb-4">
+        {/* AI Topic Input */}
+        <div className="flex flex-col sm:flex-row items-center gap-3 mb-6">
+          <input
+            type="text"
+            placeholder="Enter a topic for AI to write about..."
+            value={aiTopic}
+            onChange={(e) => setAiTopic(e.target.value)}
+            className="flex-1 p-3 border border-purple-300 dark:border-purple-600 rounded-lg bg-purple-50 dark:bg-gray-800 text-gray-900 dark:text-white"
+          />
+          <button
+            onClick={handleAIGenerate}
+            disabled={loading}
+            className="bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white px-5 py-2.5 rounded-lg shadow-md transition-all"
+          >
+            {loading ? "Generating..." : "✨ Generate Blog"}
+          </button>
+        </div>
+
+        {/* Title */}
         <input
           type="text"
           name="title"
-          placeholder="Article Title"
+          placeholder="Enter blog title..."
           value={formData.title}
           onChange={handleChange}
-          className="w-full p-2 border rounded mb-2"
+          className="w-full p-3 border border-purple-300 dark:border-gray-600 rounded-lg mb-4 bg-purple-50 dark:bg-gray-800 text-gray-900 dark:text-white"
         />
-      </div>
 
-      <div className="mb-4">
+        {/* Content */}
         <textarea
           name="content"
-          placeholder="Article Content"
+          placeholder="Write or edit your article..."
           value={formData.content}
           onChange={handleChange}
-          className="w-full p-2 border rounded mb-2 h-40"
+          className="w-full p-3 border border-purple-300 dark:border-gray-600 rounded-lg mb-6 bg-purple-50 dark:bg-gray-800 text-gray-900 dark:text-white h-64 resize-none"
         ></textarea>
-      </div>
 
-      <div className="mb-4">
-        <input
-          type="text"
-          placeholder="Enter topic for AI generation"
-          value={aiTopic}
-          onChange={(e) => setAiTopic(e.target.value)}
-          className="w-full p-2 border rounded mb-2"
-        />
-        <button
-          onClick={handleAIGenerate}
-          className="bg-purple-500 text-white px-4 py-2 rounded"
-        >
-          Generate AI Content
-        </button>
-      </div>
-
-      <button
-        onClick={handleSubmit}
-        className="bg-green-500 text-white px-4 py-2 rounded"
-      >
-        Submit Article
-      </button>
-
-      {aiGenerated && (
-        <div className="p-4 border rounded bg-gray-100 mt-4">
-          <h3 className="font-semibold mb-2">AI Generated Content:</h3>
-          <p>{aiGenerated}</p>
+        {/* Tags */}
+        <div className="mb-6">
+          <label className="block font-semibold mb-2 text-gray-700 dark:text-gray-300">
+            🏷️ Tags
+          </label>
+          <input
+            type="text"
+            name="tags"
+            placeholder="e.g. AI, Blogging, Tech"
+            value={formData.tags}
+            onChange={handleChange}
+            className="w-full p-3 border border-purple-300 dark:border-gray-600 rounded-lg bg-purple-50 dark:bg-gray-800 text-gray-900 dark:text-white"
+          />
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Auto-generated by AI — you can edit them.
+          </p>
         </div>
-      )}
+
+        {/* Submit */}
+        <button
+          onClick={handleSubmit}
+          className="w-full bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg shadow-lg transition-all"
+        >
+          🚀 Publish Article
+        </button>
+
+        {/* Related Tags Preview */}
+        {aiTags.length > 0 && (
+          <div className="mt-6">
+            <h4 className="font-semibold text-purple-700 dark:text-purple-300 mb-2">
+              🏷️ Related Tags
+            </h4>
+            <div className="flex flex-wrap gap-2">
+              {aiTags.map((tag, idx) => (
+                <span
+                  key={idx}
+                  className="bg-purple-100 dark:bg-purple-800 text-purple-700 dark:text-purple-200 px-3 py-1 rounded-full text-sm"
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

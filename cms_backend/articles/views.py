@@ -1,173 +1,308 @@
+# articles/views.py
 import os
-import ssl
-import certifi
+import traceback
 from dotenv import load_dotenv
-from rest_framework import viewsets, permissions, status, generics
+from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
 from rest_framework.views import APIView
-from openai import OpenAI
+from google import genai
+from google.genai import types
 from .models import Article, AIUsage, User
 from .serializers import ArticleSerializer, AIUsageSerializer, UserRegisterSerializer
 from .permissions import IsAuthorOrReadOnly
 
-ssl_context = ssl.create_default_context(cafile=certifi.where())
+# Load env
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-TOKEN_PRICE = 0.02
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Init Gemini client (safe)
+try:
+    client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+except Exception as e:
+    print("⚠️ Gemini init error:", e)
+    client = None
+
+# Token pricing example: $0.02 per 1k tokens -> 0.00002 per token
+TOKEN_PRICE = 0.00002
 
 
+def extract_gemini_text(resp):
+    """
+    Robust extractor for Gemini generate_content responses.
+    Returns the best available text or empty string.
+    """
+    if not resp:
+        return ""
+
+    # common attribute
+    try:
+        if hasattr(resp, "text") and resp.text:
+            return resp.text.strip()
+    except Exception:
+        pass
+
+    # other possible attributes
+    try:
+        if hasattr(resp, "output_text") and resp.output_text:
+            return resp.output_text.strip()
+    except Exception:
+        pass
+
+    # candidates -> candidate.content.parts[*].text
+    try:
+        if hasattr(resp, "candidates") and resp.candidates:
+            cand = resp.candidates[0]
+            content = getattr(cand, "content", None)
+            parts = getattr(content, "parts", None)
+            if parts:
+                texts = []
+                for p in parts:
+                    # p may be dict-like or object-like
+                    text = getattr(p, "text", None) if hasattr(p, "text") else (p.get("text") if isinstance(p, dict) else None)
+                    if text:
+                        texts.append(text)
+                if texts:
+                    return " ".join(texts).strip()
+    except Exception:
+        pass
+
+    # parsed (if present)
+    try:
+        if hasattr(resp, "parsed") and resp.parsed:
+            return str(resp.parsed).strip()
+    except Exception:
+        pass
+
+    return ""
+
+
+# ----------------- USER REGISTRATION -----------------
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserRegisterSerializer
 
 
+# ----------------- ARTICLE MANAGEMENT -----------------
 class ArticleViewSet(viewsets.ModelViewSet):
-    queryset = Article.objects.all().order_by('-created_at')
+    queryset = Article.objects.all().order_by("-created_at")
     serializer_class = ArticleSerializer
     permission_classes = [IsAuthenticatedOrReadOnly, IsAuthorOrReadOnly]
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
 
-    @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    # ---------------- Generate (returns content+tags; DOES NOT auto-save article) ----------------
+    @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
     def generate(self, request):
-        topic = request.data.get('topic')
+        """
+        Generate blog content + tags and return them.
+        Important: This endpoint no longer auto-saves the Article.
+        Frontend should call POST /articles/ to save when user publishes.
+        """
+        if not request.user or not request.user.is_authenticated:
+            return Response({"error": "Please login first."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        topic = request.data.get("topic", "").strip()
         if not topic:
             return Response({"error": "Topic is required"}, status=status.HTTP_400_BAD_REQUEST)
-        if not client.api_key:
-            return Response({"error": "OpenAI API key not set"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        if not client:
+            return Response({"error": "Gemini client not initialized"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": f"Write a detailed blog article about: {topic}"}
-                ],
-                max_tokens=500,
-                temperature=0.7
+            prompt = (
+                f"You are a professional blog writer. Write a polished, SEO-friendly blog post about '{topic}'.\n\n"
+                "Requirements:\n"
+                " - Use a catchy title (with one emoji).\n"
+                " - Add an engaging intro paragraph.\n"
+                " - Use markdown headings (##, ###), short paragraphs, spacing, and occasional emojis.\n"
+                " - Highlight key ideas using bold or italic where helpful.\n"
+                " - End with an inspiring conclusion.\n"
+                " - Then include a section titled '### 🏷️ Related Tags' and list 6 short tags separated by commas.\n\n"
+                "Return ONLY the final markdown blog post (no extra commentary)."
             )
 
-            generated_text = response.choices[0].message.content.strip()
-            tokens = response.usage.total_tokens
-            estimated_cost = round(tokens / 1000 * TOKEN_PRICE, 4)
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[types.Part(text=prompt)],
+                config=types.GenerateContentConfig(temperature=0.9, max_output_tokens=3500),
+            )
 
+            text = extract_gemini_text(resp)
+            if not text:
+                return Response({"error": "Empty AI response"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Extract tag list from bottom 'Related Tags' section if present
+            tags_list = []
+            if "Related Tags" in text:
+                try:
+                    section = text.split("Related Tags", 1)[-1]
+                    section = section.replace("🏷️", "").replace("#", "")
+                    tags_list = [t.strip() for t in section.split(",") if t.strip()]
+                    # trim to 6 tags max
+                    tags_list = tags_list[:6]
+                except Exception:
+                    tags_list = []
+            if not tags_list:
+                tags_list = ["AI", "Blogging", "Innovation", "Technology", "Learning", "Creativity"]
+
+            # Estimate tokens / cost
+            tokens = max((len(topic) + len(text)) // 4, 1)
+            estimated_cost = round(tokens * TOKEN_PRICE, 6)
+
+            # Record AI usage (article not yet created) — link article=None
             AIUsage.objects.create(
                 user=request.user,
-                feature='generate',
+                article=None,
+                feature="generate",
                 tokens_used=tokens,
-                estimated_cost=estimated_cost
+                estimated_cost=estimated_cost,
             )
 
             return Response({
                 "topic": topic,
-                "content": generated_text,
+                "content": text,
+                "tags": tags_list,
                 "tokens_used": tokens,
                 "estimated_cost": estimated_cost
-            })
+            }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            import traceback
-            print("❌ ERROR:", e)
+            print("❌ AI Error (generate):", e)
             print(traceback.format_exc())
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def _run_openai_action(self, article, prompt, feature, max_tokens=150, temperature=0.5):
-        if not article.content:
-            return {"error": "Article content is empty"}, None, None
-        if not client.api_key:
-            return {"error": "OpenAI API key not set"}, None, None
+    # ---------------- Summarize (returns summary; DOES NOT save to Article) ----------------
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def summarize(self, request, pk=None):
+        """
+        Generate and return a summary for the article.
+        Does NOT save the summary to the Article model to avoid showing it on home page automatically.
+        """
+        if not request.user or not request.user.is_authenticated:
+            return Response({"error": "Please login first."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        article = self.get_object()
+        content = (article.content or "").strip()
+        if not content:
+            return Response({"error": "Article content is empty"}, status=status.HTTP_400_BAD_REQUEST)
+        if not client:
+            return Response({"error": "Gemini client not initialized"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # trim to reasonable length for model
+        content_short = content[:3000]
 
         try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=max_tokens,
-                temperature=temperature
+            prompt = (
+                "Summarize the following blog post in 4-6 clear, professional sentences. "
+                "Avoid bullet points. Include emojis only when relevant.\n\n"
+                f"{content_short}"
             )
 
-            result_text = response.choices[0].message.content.strip()
-            tokens = response.usage.total_tokens
-            estimated_cost = round(tokens / 1000 * TOKEN_PRICE, 4)
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[types.Part(text=prompt)],
+                config=types.GenerateContentConfig(temperature=0.6, max_output_tokens=600),
+            )
 
+            summary = extract_gemini_text(resp)
+
+            # fallback retry with simpler prompt if empty
+            if not summary:
+                fallback_prompt = f"Briefly summarize this text in 2-3 sentences:\n\n{content_short[:1200]}"
+                resp2 = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[types.Part(text=fallback_prompt)],
+                    config=types.GenerateContentConfig(temperature=0.4, max_output_tokens=300),
+                )
+                summary = extract_gemini_text(resp2)
+
+            if not summary:
+                return Response({"error": "AI returned an empty summary. Try again."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Log usage (we keep article reference but do NOT write summary into the model)
+            tokens = max((len(content) + len(summary)) // 4, 1)
+            estimated_cost = round(tokens * TOKEN_PRICE, 6)
             AIUsage.objects.create(
-                user=self.request.user,
+                user=request.user,
                 article=article,
-                feature=feature,
+                feature="summarize",
                 tokens_used=tokens,
-                estimated_cost=estimated_cost
+                estimated_cost=estimated_cost,
             )
 
-            return result_text, tokens, estimated_cost
+            return Response({"summary": summary, "estimated_cost": estimated_cost}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return {"error": str(e)}, None, None
+            print("❌ Summarization Error:", e)
+            print(traceback.format_exc())
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
-    def summarize(self, request, pk=None):
-        article = self.get_object()
-        result, tokens, estimated_cost = self._run_openai_action(
-            article,
-            f"Summarize this article in 3-5 sentences:\n\n{article.content}",
-            "summarize", 150, 0.5
-        )
-        if isinstance(result, dict):
-            return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        article.summary = result
-        article.save()
-        return Response({"summary": result, "tokens_used": tokens, "estimated_cost": estimated_cost})
-
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
-    def seo(self, request, pk=None):
-        article = self.get_object()
-        result, tokens, estimated_cost = self._run_openai_action(
-            article,
-            f"Suggest meta title, description, and keywords for SEO for this article:\n\n{article.content}",
-            "seo", 100, 0.5
-        )
-        if isinstance(result, dict):
-            return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response({"seo_suggestions": result, "tokens_used": tokens, "estimated_cost": estimated_cost})
-
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
-    def tags(self, request, pk=None):
-        article = self.get_object()
-        result, tokens, estimated_cost = self._run_openai_action(
-            article,
-            f"Generate 5-10 relevant tags for this article:\n\n{article.content}",
-            "tags", 50, 0.5
-        )
-        if isinstance(result, dict):
-            return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        tags_list = [t.strip() for t in result.split(",") if t.strip()]
-        return Response({"tags": tags_list, "tokens_used": tokens, "estimated_cost": estimated_cost})
-
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    # ---------------- Sentiment Analysis ----------------
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def sentiment(self, request, pk=None):
+        """
+        Return sentiment classification for the article content.
+        """
+        if not request.user or not request.user.is_authenticated:
+            return Response({"error": "Please login first."}, status=status.HTTP_401_UNAUTHORIZED)
+
         article = self.get_object()
-        result, tokens, estimated_cost = self._run_openai_action(
-            article,
-            f"Analyze the sentiment of this article as Positive, Neutral, or Negative:\n\n{article.content}",
-            "sentiment", 10, 0
-        )
-        if isinstance(result, dict):
-            return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response({"sentiment": result, "tokens_used": tokens, "estimated_cost": estimated_cost})
+        content = (article.content or "").strip()
+        if not content:
+            return Response({"error": "Article content is empty"}, status=status.HTTP_400_BAD_REQUEST)
+        if not client:
+            return Response({"error": "Gemini client not initialized"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        content_short = content[:3000]
+
+        try:
+            prompt = (
+                "Read the article below and classify its overall sentiment as either: "
+                "'Positive', 'Negative', or 'Neutral/Mixed'. Return the classification followed by one short sentence justification.\n\n"
+                f"{content_short}"
+            )
+
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[types.Part(text=prompt)],
+                config=types.GenerateContentConfig(temperature=0.3, max_output_tokens=300),
+            )
+
+            sentiment_text = extract_gemini_text(resp)
+            if not sentiment_text:
+                return Response({"error": "Sentiment analysis failed. Empty AI response."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Log usage
+            tokens = max((len(content) + len(sentiment_text)) // 4, 1)
+            estimated_cost = round(tokens * TOKEN_PRICE, 6)
+            AIUsage.objects.create(
+                user=request.user,
+                article=article,
+                feature="sentiment",
+                tokens_used=tokens,
+                estimated_cost=estimated_cost,
+            )
+
+            return Response({"sentiment": sentiment_text, "estimated_cost": estimated_cost}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            print("❌ Sentiment Error:", e)
+            print(traceback.format_exc())
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# ----------------- AI USAGE LOG -----------------
 class AIUsageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AIUsageSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return AIUsage.objects.filter(user=self.request.user).order_by('-created_at')
+        return AIUsage.objects.filter(user=self.request.user).select_related("article").order_by("-created_at")
 
 
+# ----------------- CURRENT USER -----------------
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -175,5 +310,5 @@ class CurrentUserView(APIView):
         return Response({
             "id": request.user.id,
             "username": request.user.username,
-            "email": request.user.email
+            "email": request.user.email,
         })

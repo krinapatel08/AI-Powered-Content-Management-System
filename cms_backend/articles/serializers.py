@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Article , AIUsage
+from .models import Article, AIUsage
+
 
 class UserRegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -10,25 +11,33 @@ class UserRegisterSerializer(serializers.ModelSerializer):
         fields = ['username', 'email', 'password']
 
     def create(self, validated_data):
-        user = User.objects.create_user(
+        return User.objects.create_user(
             username=validated_data['username'],
-            email=validated_data['email'],
+            email=validated_data.get('email'),
             password=validated_data['password']
         )
-        return user
+
 
 class ArticleSerializer(serializers.ModelSerializer):
-   
-    author = serializers.StringRelatedField(read_only=True)  
+    author = serializers.StringRelatedField(read_only=True)
 
     class Meta:
         model = Article
-        fields = ['id', 'title', 'content', 'author', 'created_at', 'updated_at']
+        fields = [
+            'id', 'title', 'content', 'tags', 'summary',
+            'author', 'created_at', 'updated_at'
+        ]
 
 
 class AIUsageSerializer(serializers.ModelSerializer):
-    article_title = serializers.CharField(source='article.title', read_only=True)
+    article_title = serializers.SerializerMethodField()
 
     class Meta:
         model = AIUsage
-        fields = ['id', 'article_title', 'feature', 'tokens_used', 'estimated_cost', 'created_at']
+        fields = [
+            'id', 'article_title', 'feature',
+            'tokens_used', 'estimated_cost', 'created_at'
+        ]
+
+    def get_article_title(self, obj):
+        return obj.article.title if obj.article else "N/A"
