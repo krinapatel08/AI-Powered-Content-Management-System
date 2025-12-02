@@ -23,7 +23,12 @@ USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Frontend URL
-FRONTEND_URL = "https://silver-winner-xjq69p64rp4f67rw-3000.app.github.dev"
+FRONTEND_URL = " http://localhost:3000/"
+
+
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # -----------------------------
 # CORS Settings
@@ -51,10 +56,8 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# Allow only the frontend origin (dev)
-CORS_ALLOWED_ORIGINS = [
-    FRONTEND_URL
-]
+# Allow only the frontend origin (dev
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True  # Needed if sending cookies or JWT in headers
 
 # -----------------------------
@@ -102,7 +105,9 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    'DEFAULT_PAGINATION_CLASS': None,  # 👈 disable pagination
 }
+
 
 from datetime import timedelta
 

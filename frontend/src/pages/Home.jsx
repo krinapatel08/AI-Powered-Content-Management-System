@@ -14,14 +14,16 @@ function Home() {
     fetchUser();
   }, []);
 
-  const fetchArticles = async () => {
-    try {
-      const res = await axiosInstance.get('articles/');
-      setArticles(res.data);
-    } catch (err) {
-      console.error('Error fetching articles', err);
-    }
-  };
+ const fetchArticles = async () => {
+  try {
+    const res = await axiosInstance.get('articles/');
+    console.log("Articles API response:", res.data);
+    setArticles(res.data.results || res.data);
+  } catch (err) {
+    console.error('Error fetching articles', err);
+  }
+};
+
 
   const fetchUser = async () => {
     try {

@@ -1,6 +1,13 @@
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LogOut, LogIn, UserPlus, Home, LayoutDashboard, PenTool } from "lucide-react";
+import {
+  LogOut,
+  LogIn,
+  UserPlus,
+  Home,
+  LayoutDashboard,
+  PenTool,
+} from "lucide-react";
 
 function Navbar() {
   const navigate = useNavigate();
@@ -14,17 +21,22 @@ function Navbar() {
   return (
     <nav className="bg-white dark:bg-gray-900 shadow-md border-b border-gray-200 dark:border-gray-700">
       <div className="max-w-7xl mx-auto px-6 py-3 flex justify-between items-center">
-        {/* Logo / Brand */}
-        <Link
-          to="/"
-          className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-indigo-500 bg-clip-text text-transparent"
-        >
-          AI CMS
+        {/* Brand / Logo */}
+        <Link to="/" className="flex flex-col items-start leading-tight">
+          <span className="text-2xl font-extrabold bg-gradient-to-r from-purple-600 to-indigo-500 bg-clip-text text-transparent tracking-wide">
+            Blogify<span className="text-indigo-400">AI</span>
+          </span>
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 italic">
+            Your words, our AI — publish smarter.
+          </span>
         </Link>
 
-        {/* Links */}
+        {/* Desktop Navigation */}
         <div className="hidden md:flex items-center space-x-6 text-gray-700 dark:text-gray-200 font-medium">
-          <Link to="/" className="flex items-center gap-2 hover:text-purple-600 dark:hover:text-purple-400">
+          <Link
+            to="/"
+            className="flex items-center gap-2 hover:text-purple-600 dark:hover:text-purple-400"
+          >
             <Home className="w-4 h-4" /> Home
           </Link>
 
@@ -77,15 +89,24 @@ function Navbar() {
               ☰
             </summary>
             <div className="absolute right-0 mt-2 bg-white dark:bg-gray-800 shadow-lg rounded-lg py-2 w-40 border border-gray-200 dark:border-gray-700">
-              <Link to="/" className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700">
+              <Link
+                to="/"
+                className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
                 Home
               </Link>
               {token ? (
                 <>
-                  <Link to="/create" className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700">
+                  <Link
+                    to="/create"
+                    className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
                     Create
                   </Link>
-                  <Link to="/dashboard" className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700">
+                  <Link
+                    to="/dashboard"
+                    className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
                     Dashboard
                   </Link>
                   <button
@@ -97,10 +118,16 @@ function Navbar() {
                 </>
               ) : (
                 <>
-                  <Link to="/login" className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700">
+                  <Link
+                    to="/login"
+                    className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
                     Login
                   </Link>
-                  <Link to="/register" className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700">
+                  <Link
+                    to="/register"
+                    className="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
                     Register
                   </Link>
                 </>
